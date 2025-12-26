@@ -1,12 +1,12 @@
 # configs/reports_types.py
 REPORT_TYPES = [
     {
-        "key": "sales",
+        "key": "sales_amount",
         "path": "/analytics/sales-v2",
         "download_label": "下載銷售額"
-    },
+    },                                                                                          
     {
-        "key": "sales_Conversion",
+        "key": "sales_conversion",
         "path": "/analytics/sales-v2",
         "download_label": "下載轉換率"
     },

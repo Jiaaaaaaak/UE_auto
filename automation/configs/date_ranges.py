@@ -70,10 +70,4 @@ DATE_PRESET_REGISTRY: Dict[str, DatePreset] = {
         key="last_month",
         type="last_month",
     ),
-    "custom_2024_01": DatePreset(
-        key="custom_2024_01",
-        type="custom",
-        start="2024-01-01",
-        end="2024-01-31",
-    ),
 }

@@ -1,85 +1,118 @@
-# automation/main.py
 from __future__ import annotations
 
-from pathlib import Path
+import argparse
+import sys
 
 from core.browser import BrowserManager
 from core.navigation import (
-    DownloadMeta,
     build_report_url,
-    goto_report_page,
-    download_report_as_xlsx,
+    download_sales_reports,
+    download_customers_report,
 )
-from core.file_utils import merge_xlsx_to_summary, sanitize_filename
-
 from configs.stores import STORES
-from configs.defaults import DEFAULT_DATE_PRESETS
-from configs.reports_types import REPORT_TYPES
-from configs.date_ranges import (
-    DATE_PRESET_REGISTRY,
-    resolve_date_range,
-    DatePreset,
-)
+from configs.date_ranges import DATE_PRESET_REGISTRY, resolve_date_range
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Uber Eats 報表自動下載（一次只跑一間商店）"
+    )
+    parser.add_argument(
+        "--store",
+        required=True,
+        help="商店名稱（需與 configs/stores.py 中的 name 完全一致）",
+    )
+    return parser.parse_args()
+
+
+def find_store(store_name: str) -> dict:
+    for store in STORES:
+        if store["name"] == store_name:
+            return store
+    raise ValueError(f"找不到商店：{store_name}")
 
 
 def main() -> None:
-    browser = BrowserManager(
-        user_data_dir="user_data",
-        download_dir="tmp_downloads",  # 只是給 Playwright 用，實際我們自己 save_as
+    args = parse_args()
+
+    try:
+        store = find_store(args.store)
+    except ValueError as e:
+        print(f"❌ {e}")
+        print("👉 可用商店清單：")
+        for s in STORES:
+            print(f" - {s['name']}")
+        sys.exit(1)
+
+    store_name = store["name"]
+    store_id = store["store_id"]
+    safe_store_key = store_name.replace(" ", "_")
+    user_data_dir = f"user_data/{safe_store_key}"
+    print(f"\n🏪 目標商店：{store_name}")
+
+    # ======================
+    # 啟動 Persistent Context（只能一次）
+    # ======================
+    browser_manager = BrowserManager(
+        user_data_dir=user_data_dir,
+        download_dir="reports",
         headless=False,
     )
 
-    context = browser.start()
+    context = browser_manager.start()
     page = context.new_page()
+   
+    try:
+        preset_keys = store.get("date_presets")
+        if isinstance(preset_keys, str):
+            preset_keys = [preset_keys]
 
-
-    # 收集每家店/每種報表下載到的 xlsx（用來做 summary）
-    downloaded_index: dict[tuple[str, str], list[Path]] = {}
-
-    for store in STORES:
-        store_name: str = store["name"]
-        store_id: str = store["store_id"]
-
-        preset_keys = store.get("date_presets", DEFAULT_DATE_PRESETS)
+        if not preset_keys:
+            raise ValueError(f"{store_name} 未設定 date_presets")
 
         for preset_key in preset_keys:
             preset = DATE_PRESET_REGISTRY[preset_key]
             start, end = resolve_date_range(preset)
 
-            for report in REPORT_TYPES:
-                report_key: str = report["key"]
-                report_path: str = report["path"]
+            print(f"  📅 區間：{preset_key} | {start} ~ {end}")
 
-                url = build_report_url(store_id, report_path, start, end)
-                print(f"▶ {store_name} | {report_key} | {preset_key} | {start}~{end}")
+            # ---------- Sales ----------
+            sales_url = build_report_url(
+                store_id=store_id,
+                report_key="sales",
+                start=start,
+                end=end,
+            )
 
-                goto_report_page(page, url)
+            download_sales_reports(
+                page=page,
+                url=sales_url,
+                store_name=store_name,
+                preset_key=preset_key,
+                start=start,
+                end=end,
+            )
 
-                meta = DownloadMeta(
-                    store_name=store_name,
-                    report_key=report_key,
-                    preset_key=preset_key,
-                    start=start,
-                    end=end,
-                )
+            # ---------- Customers ----------
+            customers_url = build_report_url(
+                store_id=store_id,
+                report_key="customers",
+                start=start,
+                end=end,
+            )
 
-                xlsx_path = download_report_as_xlsx(page, meta)
-                print(f"✅ 完成：{xlsx_path}")
+            download_customers_report(
+                page=page,
+                url=customers_url,
+                store_name=store_name,
+                preset_key=preset_key,
+                start=start,
+                end=end,
+            )
 
-                downloaded_index.setdefault((store_name, report_key), []).append(xlsx_path)
-
-    # === 合併 summary（每家店 × 每種報表各一份）===
-    for (store_name, report_key), files in downloaded_index.items():
-        safe_store = sanitize_filename(store_name)
-        safe_report = sanitize_filename(report_key)
-
-        out_path = Path("reports") / safe_store / safe_report / f"{safe_store}_{safe_report}_SUMMARY.xlsx"
-        summary = merge_xlsx_to_summary(
-            files,
-            out_path,
-            extra_columns={"store": store_name, "report": report_key},
-        )
-        print(f"📊 Summary 產出：{summary}")
+    finally:
+        # ❗ 不 stop browser，保留登入
+        print("\n✅ 報表下載完成（單一商店）")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ from playwright.sync_api import sync_playwright, BrowserContext, Playwright
 class BrowserManager:
     def __init__(
         self,
-        user_data_dir: str,
-        download_dir: str,
+        user_data_dir="user_data",
+        download_dir="reports/_tmp",
         headless: bool = False
     ):
         """
